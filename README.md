@@ -1,5 +1,4 @@
 # minionerec_value_award
-change award
 @misc{MiniOneRec,
       title={MiniOneRec: An Open-Source Framework for Scaling Generative Recommendation}, 
       author={Xiaoyu Kong and Leheng Sheng and Junfei Tan and Yuxin Chen and Jiancan Wu and An Zhang and Xiang Wang and Xiangnan He},
