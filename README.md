@@ -1,5 +1,5 @@
 <div align="center">
-
+This project is based on AkaliKong/MiniOneRec and includes my own modifications for value-aware / reward-related experiments.
 
 <img src="./assets/logo.png" width="500em" ></img> 
 
