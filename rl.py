@@ -64,6 +64,7 @@ def train(
     cf_path: str = "",
     sid_index_path: str = "",
     item_meta_path: str = "",
+    item_value_path: str = "",
     dapo: bool = False,
     gspo: bool = False,
 ):
@@ -74,12 +75,19 @@ def train(
     category_dict = {"Industrial_and_Scientific": "industrial and scientific items", "Office_Products": "office products", "Toys_and_Games": "toys and games", "Sports": "sports and outdoors", "Books": "books"}
     print(category)
     
-    
     with open(info_file, 'r') as f:
         info = f.readlines()
         # Extract semantic_id (first column) from the format: semantic_id \t item_title \t item_id
         item_name = [_.split('\t')[0].strip() for _ in info]
         item2id = {name: i for i, name in enumerate(item_name)}
+
+    item_value_dict = {}
+    if item_value_path:
+        with open(item_value_path, "r", encoding="utf-8") as f:
+            item_value_dict = json.load(f)
+        print(f"Load item_value_dict successfully. num_items={len(item_value_dict)}")
+    else:
+        print("No item_value_path provided, will not use value-aware reward.")
 
     sample = -1
     train_datasets = []
@@ -89,7 +97,7 @@ def train(
     train_datasets.append(train_data1)
     train_data2 = RLTitle2SidDataset(item_file=item_meta_path, index_file=sid_index_path, category=category_dict[category], sample=sample)
     train_datasets.append(train_data2)
-    train_data3 = RLSeqTitle2SidDataset(train_file, category=category_dict[category], sample=10000)
+    train_data3 = RLSeqTitle2SidDataset(train_file, category=category_dict[category], sample=-1)
     train_datasets.append(train_data3)
     # train_data4 = RLSid2TitleDataset(item_file=item_meta_path, index_file=sid_index_path, category=category_dict[category], sample=sample)
     # train_datasets.append(train_data4)
@@ -110,7 +118,6 @@ def train(
     eval_dataset = Dataset.from_dict({k : [elm[k] for elm in eval_data] for k in eval_data[0].keys()})
     eval_dataset = eval_dataset.shuffle(seed=seed)
     
-
     # prompt2history = {**train_data.prompt2history, **eval_data.prompt2history}
     # history2target = {**train_data.history2target, **eval_data.history2target}
 
@@ -156,7 +163,6 @@ def train(
     ndcg_rewards = [-1.0/math.log2(i+2) for i in range(num_generations)]
     ndcg_rewards = [-elm/sum(ndcg_rewards) for elm in ndcg_rewards]
 
-
     def ndcg_rule_reward(prompts, completions):
         history = [prompt2history[prompt] for prompt in prompts]
         targets = [history2target[elm] for elm in history]
@@ -196,6 +202,34 @@ def train(
                 rewards.append(0.0)
         return rewards
 
+    def value_ranking_reward(prompts, completions):
+        history = [prompt2history[prompt] for prompt in prompts]
+        targets = [history2target[elm] for elm in history]
+        repeat = num_generations
+        rewards = []
+        flag = False
+        lis = []
+
+        for i, completion in enumerate(completions):
+            target_sid = targets[i].strip("\n\" ")
+            value_weight = float(item_value_dict.get(target_sid, 1.0))
+
+            if completion.strip("\n\" ") == target_sid:
+                flag = True
+                lis.append(0.0 * value_weight)
+            else:
+                lis.append(ndcg_rewards[i % num_generations] * value_weight)
+            
+            if (i + 1) % num_generations == 0:
+                if flag:
+                    rewards.extend(lis)
+                else:
+                    rewards.extend([0.0] * repeat)
+                flag = False
+                lis = []
+
+        return rewards
+
     def semantic_reward(prompts, completions):
         history = [prompt2history[prompt] for prompt in prompts]
         targets = [history2target[elm] for elm in history]
@@ -219,10 +253,6 @@ def train(
         for i, elm in enumerate(completions):
             elm = elm.strip("\n\"")
             if elm not in item_name:
-                # print("========Invalid Item========")
-                # print(f"Invalid item: {elm}")
-                # print(f"Prompt: {prompts[i]}")
-                # print("============================")
                 pred_ids.append(random.randint(0, item_num-1))
             else:
                 pred_ids.append(item2id[elm])
@@ -244,12 +274,12 @@ def train(
             scores = torch.gather(predictions, 1,  pred.view(-1, 1)).view(-1)
         return scores
     
-
-
     if reward_type == "rule":
         reward_fun = rule_reward
     elif reward_type == "ranking":
         reward_fun = [rule_reward, ndcg_rule_reward]
+    elif reward_type == "value_ranking":
+        reward_fun = [rule_reward, value_ranking_reward]
     elif reward_type == "ranking_only":
         reward_fun = ndcg_rule_reward
     elif reward_type == "semantic":

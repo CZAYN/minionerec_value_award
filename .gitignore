@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+*.pyo
+*.log
+.vscode/
+output_dir/
+results/
+temp/
+wandb/
